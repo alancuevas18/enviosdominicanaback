@@ -75,4 +75,34 @@ trait ApiResponse
     {
         return $this->error($message, Response::HTTP_UNPROCESSABLE_ENTITY, $errors);
     }
+
+    /**
+     * Return a paginated response with meta and links.
+     *
+     * @param  \Illuminate\Contracts\Pagination\LengthAwarePaginator<mixed>  $paginator
+     */
+    protected function paginated(
+        \Illuminate\Contracts\Pagination\LengthAwarePaginator $paginator,
+        string $message = 'Success'
+    ): JsonResponse {
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'data' => $paginator->items(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ],
+            'links' => [
+                'first' => $paginator->url(1),
+                'last' => $paginator->url($paginator->lastPage()),
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
+        ]);
+    }
 }

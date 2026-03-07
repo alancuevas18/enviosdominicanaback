@@ -18,10 +18,26 @@ final class UserResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        /** @var User $this */
+        $roles = $this->getRoleNames();
+
         return [
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
+            'phone' => $this->phone,
+            'active' => $this->active,
+            'roles' => $roles,
+            'role' => $roles->first(),
+            'branches' => $this->whenLoaded('branches', fn() => $this->branches->map(fn($b) => [
+                'id' => $b->id,
+                'name' => $b->name,
+                'city' => $b->city,
+            ])),
+            'active_branch_id' => $this->when(
+                $request->user()?->is($this->resource),
+                fn() => $this->getActiveBranchId()
+            ),
             'email_verified_at' => $this->email_verified_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

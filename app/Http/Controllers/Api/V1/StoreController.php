@@ -1,0 +1,153 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Api\ApiController;
+use App\Http\Requests\Api\V1\CreateStoreRequest;
+use App\Models\Store;
+use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+
+class StoreController extends ApiController
+{
+    /**
+     * List all stores filtered by branch context.
+     *
+     * GET /api/v1/stores
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Store::class);
+
+        $stores = Store::query()
+            ->with(['branch:id,name,city', 'user:id,name,email'])
+            ->when($request->boolean('active_only', true), fn($q) => $q->where('active', true))
+            ->when($request->filled('search'), function ($q) use ($request): void {
+                $search = $request->input('search');
+                $q->where(function ($sub) use ($search): void {
+                    $sub->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('phone', 'like', "%{$search}%");
+                });
+            })
+            ->latest()
+            ->paginate(20);
+
+        return $this->paginated($stores, 'Tiendas obtenidas exitosamente.');
+    }
+
+    /**
+     * Create a new store manually (without an access request).
+     *
+     * POST /api/v1/stores
+     */
+    public function store(CreateStoreRequest $request): JsonResponse
+    {
+        $this->authorize('create', Store::class);
+
+        $result = DB::transaction(function () use ($request): Store {
+            $tempPassword = Str::password(12, symbols: false);
+
+            /** @var User $user */
+            $user = User::create([
+                'name' => $request->input('user_name'),
+                'email' => $request->input('user_email'),
+                'password' => $tempPassword,
+                'phone' => $request->input('user_phone'),
+                'active' => true,
+                'email_verified_at' => now(),
+            ]);
+
+            $user->assignRole('store');
+
+            $storeData = $request->safe()->except(['user_name', 'user_email', 'user_phone']);
+
+            return Store::create(array_merge($storeData->toArray(), ['user_id' => $user->id]));
+        });
+
+        return $this->created($result->load(['branch:id,name', 'user:id,name,email']), 'Tienda creada exitosamente.');
+    }
+
+    /**
+     * Show store details with shipment history and stats.
+     *
+     * GET /api/v1/stores/{id}
+     */
+    public function show(Store $store): JsonResponse
+    {
+        $this->authorize('view', $store);
+
+        $store->load(['branch:id,name,city', 'user:id,name,email,phone']);
+
+        $stats = [
+            'total_shipments' => $store->shipments()->count(),
+            'delivered' => $store->shipments()->where('status', 'delivered')->count(),
+            'pending' => $store->shipments()->where('status', 'pending')->count(),
+            'not_delivered' => $store->shipments()->where('status', 'not_delivered')->count(),
+        ];
+
+        $recentShipments = $store->shipments()
+            ->with(['courier:id,name', 'stops'])
+            ->latest()
+            ->limit(10)
+            ->get();
+
+        return $this->success([
+            'store' => $store,
+            'stats' => $stats,
+            'recent_shipments' => $recentShipments,
+        ], 'Tienda obtenida exitosamente.');
+    }
+
+    /**
+     * Update store data.
+     *
+     * PUT /api/v1/stores/{id}
+     */
+    public function update(Request $request, Store $store): JsonResponse
+    {
+        $this->authorize('update', $store);
+
+        $request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'legal_name' => ['nullable', 'string', 'max:255'],
+            'rnc' => ['nullable', 'string', 'max:20'],
+            'phone' => ['nullable', 'string', 'max:20'],
+            'whatsapp' => ['nullable', 'string', 'max:20'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'address' => ['nullable', 'string'],
+            'sector' => ['nullable', 'string', 'max:255'],
+            'city' => ['nullable', 'string', 'max:255'],
+            'province' => ['nullable', 'string', 'max:255'],
+            'website' => ['nullable', 'url', 'max:255'],
+            'instagram' => ['nullable', 'string', 'max:100'],
+            'contact_person' => ['nullable', 'string', 'max:255'],
+            'default_notification_message' => ['nullable', 'string'],
+            'notes' => ['nullable', 'string'],
+            'active' => ['sometimes', 'boolean'],
+        ]);
+
+        $store->update($request->validated());
+
+        return $this->success($store, 'Tienda actualizada exitosamente.');
+    }
+
+    /**
+     * Deactivate a store.
+     *
+     * DELETE /api/v1/stores/{id}
+     */
+    public function destroy(Store $store): JsonResponse
+    {
+        $this->authorize('delete', $store);
+
+        $store->update(['active' => false]);
+
+        return $this->success(null, 'Tienda desactivada exitosamente.');
+    }
+}

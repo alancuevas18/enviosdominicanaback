@@ -3,41 +3,144 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BranchController;
+use App\Http\Controllers\Api\V1\CourierController;
+use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\PhotoController;
+use App\Http\Controllers\Api\V1\ProfileController;
+use App\Http\Controllers\Api\V1\PushSubscriptionController;
+use App\Http\Controllers\Api\V1\RouteController;
+use App\Http\Controllers\Api\V1\ShipmentController;
+use App\Http\Controllers\Api\V1\StopController;
+use App\Http\Controllers\Api\V1\StoreAccessRequestController;
+use App\Http\Controllers\Api\V1\StoreController;
 use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
 | API V1 Routes
 |--------------------------------------------------------------------------
-|
-| Routes for API version 1.
-|
 */
 
-// Public routes with auth rate limiter (5/min - brute force protection)
+// ──────────────────────────────────────────────────────────────────────────
+// Public (unauthenticated)
+// ──────────────────────────────────────────────────────────────────────────
 Route::middleware('throttle:auth')->group(function (): void {
-    Route::post('register', [AuthController::class, 'register'])->name('api.v1.register');
     Route::post('login', [AuthController::class, 'login'])->name('api.v1.login');
+    Route::post('forgot-password', [AuthController::class, 'forgotPassword'])->name('password.email');
+    Route::post('reset-password', [AuthController::class, 'resetPassword'])->name('password.reset');
 });
 
-// Protected routes with authenticated rate limiter (120/min)
+// Store access request — public submission (honeypot protected inside FormRequest)
+Route::post('access-requests', [StoreAccessRequestController::class, 'submit'])
+    ->middleware('throttle:10,1')
+    ->name('api.v1.access-requests.submit');
+
+// ──────────────────────────────────────────────────────────────────────────
+// Authenticated
+// ──────────────────────────────────────────────────────────────────────────
 Route::middleware(['auth:sanctum', 'throttle:authenticated'])->group(function (): void {
+
+    // Auth
     Route::post('logout', [AuthController::class, 'logout'])->name('api.v1.logout');
     Route::get('me', [AuthController::class, 'me'])->name('api.v1.me');
+    Route::post('switch-branch', [AuthController::class, 'switchBranch'])
+        ->middleware('throttle:10,1')
+        ->name('api.v1.switch-branch');
 
-    // Email verification
-    Route::post('email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
-        ->middleware('signed')
-        ->name('verification.verify');
-    Route::post('email/resend', [AuthController::class, 'resendVerificationEmail'])
-        ->middleware('throttle:6,1')
-        ->name('verification.send');
-});
+    // Profile (all roles)
+    Route::prefix('profile')->name('api.v1.profile.')->group(function (): void {
+        Route::get('/', [ProfileController::class, 'show'])->name('show');
+        Route::put('/', [ProfileController::class, 'update'])->name('update');
+        Route::put('store', [ProfileController::class, 'updateStore'])->name('store.update');
+        Route::post('logo/presigned-url', [ProfileController::class, 'logoPresignedUrl'])->name('logo.presigned-url');
+        Route::post('logo/confirm', [ProfileController::class, 'confirmLogo'])->name('logo.confirm');
+    });
 
-// Password reset routes (public with rate limiting)
-Route::middleware('throttle:6,1')->group(function (): void {
-    Route::post('forgot-password', [AuthController::class, 'forgotPassword'])
-        ->name('password.email');
-    Route::post('reset-password', [AuthController::class, 'resetPassword'])
-        ->name('password.reset');
+    // Notifications (all roles)
+    Route::prefix('notifications')->name('api.v1.notifications.')->group(function (): void {
+        Route::get('/', [NotificationController::class, 'index'])->name('index');
+        Route::post('read-all', [NotificationController::class, 'markAllAsRead'])->name('read-all');
+        Route::post('{id}/read', [NotificationController::class, 'markAsRead'])->name('read');
+        Route::delete('{id}', [NotificationController::class, 'destroy'])->name('destroy');
+    });
+
+    // Push subscriptions (all roles, primarily courier)
+    Route::post('push-subscriptions', [PushSubscriptionController::class, 'subscribe'])->name('api.v1.push-subscriptions.subscribe');
+    Route::delete('push-subscriptions', [PushSubscriptionController::class, 'unsubscribe'])->name('api.v1.push-subscriptions.unsubscribe');
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Root only
+    // ──────────────────────────────────────────────────────────────────────
+    Route::middleware('role:root')->name('api.v1.root.')->group(function (): void {
+
+        // Branches management
+        Route::apiResource('branches', BranchController::class)->names('branches');
+        Route::post('branches/{branch}/admins', [BranchController::class, 'assignAdmins'])->name('branches.admins.assign');
+        Route::delete('branches/{branch}/admins/{user}', [BranchController::class, 'removeAdmin'])->name('branches.admins.remove');
+
+        // Access requests management
+        Route::prefix('access-requests')->name('access-requests.')->group(function (): void {
+            Route::get('/', [StoreAccessRequestController::class, 'index'])->name('index');
+            Route::get('{accessRequest}', [StoreAccessRequestController::class, 'show'])->name('show');
+            Route::post('{accessRequest}/approve', [StoreAccessRequestController::class, 'approve'])->name('approve');
+            Route::post('{accessRequest}/reject', [StoreAccessRequestController::class, 'reject'])->name('reject');
+        });
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Root + Admin (with mandatory branch context)
+    // ──────────────────────────────────────────────────────────────────────
+    Route::middleware(['role:root|admin', 'ensure.branch.context'])->name('api.v1.admin.')->group(function (): void {
+
+        // Stores — admin CRUD
+        Route::apiResource('stores', StoreController::class)
+            ->except(['create', 'edit'])
+            ->names('stores');
+
+        // Couriers — admin CRUD
+        Route::apiResource('couriers', CourierController::class)
+            ->except(['create', 'edit'])
+            ->names('couriers');
+        Route::get('couriers/{courier}/ratings', [CourierController::class, 'ratings'])->name('couriers.ratings');
+
+        // Shipments — admin view & management
+        Route::patch('shipments/{shipment}', [ShipmentController::class, 'update'])->name('shipments.update');
+        Route::post('shipments/{shipment}/assign', [ShipmentController::class, 'assign'])->name('shipments.assign');
+
+        // Routes — admin view & reorder
+        Route::get('routes', [RouteController::class, 'index'])->name('routes.index');
+        Route::post('routes/{route}/reorder', [RouteController::class, 'reorder'])->name('routes.reorder');
+
+        // Dashboard KPIs
+        Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard.index');
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Store role
+    // ──────────────────────────────────────────────────────────────────────
+    Route::middleware('role:store')->name('api.v1.store.')->group(function (): void {
+        Route::post('shipments', [ShipmentController::class, 'store'])->name('shipments.store');
+        Route::post('shipments/{shipment}/rate', [ShipmentController::class, 'rate'])->name('shipments.rate');
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Shared: Store + Admin can read shipments
+    // ──────────────────────────────────────────────────────────────────────
+    Route::middleware('role:root|admin|store')->name('api.v1.shipments.')->group(function (): void {
+        Route::get('shipments', [ShipmentController::class, 'index'])->name('index');
+        Route::get('shipments/{shipment}', [ShipmentController::class, 'show'])->name('show');
+        Route::get('shipments/{shipment}/history', [ShipmentController::class, 'history'])->name('history');
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Courier role
+    // ──────────────────────────────────────────────────────────────────────
+    Route::middleware('role:courier')->name('api.v1.courier.')->group(function (): void {
+        Route::get('routes/today', [RouteController::class, 'today'])->name('routes.today');
+        Route::patch('stops/{stop}/status', [StopController::class, 'updateStatus'])->name('stops.update-status');
+        Route::post('photos/presigned-url', [PhotoController::class, 'presignedUrl'])->name('photos.presigned-url');
+        Route::post('photos/confirm', [PhotoController::class, 'confirm'])->name('photos.confirm');
+    });
 });
