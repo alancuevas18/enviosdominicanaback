@@ -13,9 +13,11 @@ use App\Models\User;
 use App\Notifications\NewAccessRequestNotification;
 use App\Notifications\StoreApprovedNotification;
 use App\Notifications\StoreRejectedNotification;
+use App\Support\ApiCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\Str;
 
 class StoreAccessRequestController extends ApiController
@@ -127,13 +129,15 @@ class StoreAccessRequestController extends ApiController
             // 4. Mark request as approved
             $storeAccessRequest->update([
                 'status' => 'approved',
-                'reviewed_by' => auth()->id(),
+                'reviewed_by' => $request->user()?->id,
                 'review_notes' => $request->input('review_notes'),
             ]);
 
             // 5. Send approval notification with credentials
             $user->notify(new StoreApprovedNotification($user, $tempPassword));
         });
+
+        ApiCache::bumpMany(['stores-index', 'branches-index']);
 
         return $this->success(null, 'Solicitud aprobada. Las credenciales fueron enviadas al correo del solicitante.');
     }
@@ -153,16 +157,17 @@ class StoreAccessRequestController extends ApiController
 
         $storeAccessRequest->update([
             'status' => 'rejected',
-            'reviewed_by' => auth()->id(),
+            'reviewed_by' => $request->user()?->id,
             'review_notes' => $request->input('review_notes'),
         ]);
 
-        // Notify the requester by email
-        $tempUser = new User([
-            'name' => $storeAccessRequest->contact_name,
-            'email' => $storeAccessRequest->email,
-        ]);
-        $tempUser->notify(new StoreRejectedNotification(
+        // Notify the requester by email.
+        // Use on-demand routing: the applicant has no saved User record,
+        // so passing an unsaved model to a ShouldQueue notification would
+        // cause the queue worker to fail deserialization (null primary key).
+        NotificationFacade::route('mail', [
+            $storeAccessRequest->email => $storeAccessRequest->contact_name,
+        ])->notify(new StoreRejectedNotification(
             $storeAccessRequest->contact_name,
             $storeAccessRequest->email,
             $request->input('review_notes') ?? ''

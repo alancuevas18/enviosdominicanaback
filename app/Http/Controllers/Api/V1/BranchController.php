@@ -9,6 +9,7 @@ use App\Http\Requests\Api\V1\CreateBranchRequest;
 use App\Http\Requests\Api\V1\UpdateBranchRequest;
 use App\Models\Branch;
 use App\Models\User;
+use App\Support\ApiCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -23,10 +24,23 @@ class BranchController extends ApiController
     {
         $this->authorize('viewAny', Branch::class);
 
-        $branches = Branch::query()
-            ->when($request->boolean('active_only'), fn($q) => $q->where('active', true))
-            ->withCount(['stores', 'couriers', 'shipments'])
-            ->paginate(20);
+        $cacheKey = implode(':', [
+            'user',
+            (string) $request->user()?->id,
+            'active_only',
+            (string) (int) $request->boolean('active_only'),
+            'page',
+            (string) (int) $request->input('page', 1),
+        ]);
+
+        $ttlSeconds = max(10, (int) env('LIST_CACHE_TTL_SECONDS', 60));
+
+        $branches = ApiCache::remember('branches-index', $cacheKey, now()->addSeconds($ttlSeconds), function () use ($request) {
+            return Branch::query()
+                ->when($request->boolean('active_only'), fn($q) => $q->where('active', true))
+                ->withCount(['stores', 'couriers', 'shipments'])
+                ->paginate(20);
+        });
 
         return $this->paginated($branches, 'Sucursales obtenidas exitosamente.');
     }
@@ -41,6 +55,7 @@ class BranchController extends ApiController
         $this->authorize('create', Branch::class);
 
         $branch = Branch::create($request->validated());
+        ApiCache::bump('branches-index');
 
         return $this->created($branch, 'Sucursal creada exitosamente.');
     }
@@ -73,6 +88,7 @@ class BranchController extends ApiController
         $this->authorize('update', $branch);
 
         $branch->update($request->validated());
+        ApiCache::bump('branches-index');
 
         return $this->success($branch, 'Sucursal actualizada exitosamente.');
     }
@@ -87,6 +103,7 @@ class BranchController extends ApiController
         $this->authorize('delete', $branch);
 
         $branch->update(['active' => false]);
+        ApiCache::bump('branches-index');
 
         return $this->success(null, 'Sucursal desactivada exitosamente.');
     }
@@ -120,6 +137,7 @@ class BranchController extends ApiController
 
         // Sync — attach without removing existing ones
         $branch->admins()->syncWithoutDetaching($adminUsers);
+        ApiCache::bump('branches-index');
 
         return $this->success(null, 'Admins asignados exitosamente.');
     }
@@ -134,6 +152,7 @@ class BranchController extends ApiController
         $this->authorize('update', $branch);
 
         $branch->admins()->detach($user->id);
+        ApiCache::bump('branches-index');
 
         return $this->success(null, 'Admin desasignado exitosamente.');
     }

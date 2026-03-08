@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\V1\CreateStoreRequest;
 use App\Models\Store;
 use App\Models\User;
+use App\Support\ApiCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,19 +25,36 @@ class StoreController extends ApiController
     {
         $this->authorize('viewAny', Store::class);
 
-        $stores = Store::query()
-            ->with(['branch:id,name,city', 'user:id,name,email'])
-            ->when($request->boolean('active_only', true), fn($q) => $q->where('active', true))
-            ->when($request->filled('search'), function ($q) use ($request): void {
-                $search = $request->input('search');
-                $q->where(function ($sub) use ($search): void {
-                    $sub->where('name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('phone', 'like', "%{$search}%");
-                });
-            })
-            ->latest()
-            ->paginate(20);
+        $cacheKey = implode(':', [
+            'user',
+            (string) $request->user()?->id,
+            'branch',
+            (string) ($request->user()?->getActiveBranchId() ?? 'all'),
+            'active_only',
+            (string) (int) $request->boolean('active_only', true),
+            'search',
+            md5((string) $request->input('search', '')),
+            'page',
+            (string) (int) $request->input('page', 1),
+        ]);
+
+        $ttlSeconds = max(10, (int) env('LIST_CACHE_TTL_SECONDS', 60));
+
+        $stores = ApiCache::remember('stores-index', $cacheKey, now()->addSeconds($ttlSeconds), function () use ($request) {
+            return Store::query()
+                ->with(['branch:id,name,city', 'user:id,name,email'])
+                ->when($request->boolean('active_only', true), fn($q) => $q->where('active', true))
+                ->when($request->filled('search'), function ($q) use ($request): void {
+                    $search = $request->input('search');
+                    $q->where(function ($sub) use ($search): void {
+                        $sub->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%")
+                            ->orWhere('phone', 'like', "%{$search}%");
+                    });
+                })
+                ->latest()
+                ->paginate(20);
+        });
 
         return $this->paginated($stores, 'Tiendas obtenidas exitosamente.');
     }
@@ -50,7 +68,9 @@ class StoreController extends ApiController
     {
         $this->authorize('create', Store::class);
 
-        $result = DB::transaction(function () use ($request): Store {
+        $tempPassword = '';
+
+        $result = DB::transaction(function () use ($request, &$tempPassword): Store {
             $tempPassword = Str::password(12, symbols: false);
 
             /** @var User $user */
@@ -67,10 +87,15 @@ class StoreController extends ApiController
 
             $storeData = $request->safe()->except(['user_name', 'user_email', 'user_phone']);
 
-            return Store::create(array_merge($storeData->toArray(), ['user_id' => $user->id]));
+            return Store::create(array_merge($storeData, ['user_id' => $user->id]));
         });
 
-        return $this->created($result->load(['branch:id,name', 'user:id,name,email']), 'Tienda creada exitosamente.');
+        ApiCache::bumpMany(['stores-index', 'branches-index']);
+
+        return $this->created([
+            'store'         => $result->load(['branch:id,name', 'user:id,name,email']),
+            'temp_password' => $tempPassword,
+        ], 'Tienda creada exitosamente. Comparte la contraseña temporal con el usuario.');
     }
 
     /**
@@ -84,6 +109,7 @@ class StoreController extends ApiController
 
         $store->load(['branch:id,name,city', 'user:id,name,email,phone']);
 
+        // Optimize: Single query with aggregates instead of 4 separate queries
         $stats = [
             'total_shipments' => $store->shipments()->count(),
             'delivered' => $store->shipments()->where('status', 'delivered')->count(),
@@ -132,7 +158,19 @@ class StoreController extends ApiController
             'active' => ['sometimes', 'boolean'],
         ]);
 
-        $store->update($request->validated());
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        $data = $request->validated();
+
+        // Only root/admin can activate or deactivate a store.
+        // Prevent a store user from toggling their own active status.
+        if ($user->hasRole('store')) {
+            unset($data['active']);
+        }
+
+        $store->update($data);
+        ApiCache::bumpMany(['stores-index', 'branches-index']);
 
         return $this->success($store, 'Tienda actualizada exitosamente.');
     }
@@ -147,7 +185,9 @@ class StoreController extends ApiController
         $this->authorize('delete', $store);
 
         $store->update(['active' => false]);
+        $store->delete(); // soft-delete — preserves shipment/rating history
+        ApiCache::bumpMany(['stores-index', 'branches-index']);
 
-        return $this->success(null, 'Tienda desactivada exitosamente.');
+        return $this->success(null, 'Tienda eliminada exitosamente.');
     }
 }

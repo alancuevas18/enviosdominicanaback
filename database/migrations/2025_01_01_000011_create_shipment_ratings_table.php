@@ -13,11 +13,13 @@ return new class extends Migration
         Schema::create('shipment_ratings', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('shipment_id')->unique()->constrained('shipments')->cascadeOnDelete();
-            $table->foreignId('store_id')->constrained('stores');
-            $table->foreignId('courier_id')->constrained('couriers');
+            $table->foreignId('store_id')->constrained('stores')->cascadeOnDelete()->index();
+            $table->foreignId('courier_id')->constrained('couriers')->cascadeOnDelete()->index();
             $table->tinyInteger('score');
             $table->text('comment')->nullable();
             $table->timestamps();
+
+            $table->unique(['shipment_id', 'store_id']);
         });
     }
 

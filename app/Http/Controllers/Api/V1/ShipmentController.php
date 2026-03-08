@@ -20,6 +20,8 @@ use App\Events\ShipmentCreatedEvent;
 use App\Notifications\NewShipmentAssignedPushNotification;
 use App\Notifications\ShipmentAssignedNotification;
 use App\Notifications\ShipmentCreatedNotification;
+use App\Support\ApiCache;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -93,7 +95,10 @@ class ShipmentController extends ApiController
                 // Security: admin can only create shipments for stores within their active branch
                 if ($user->hasRole('admin')) {
                     $activeBranchId = $user->getActiveBranchId();
-                    if ($activeBranchId !== null && $activeBranchId !== $branchId) {
+                    if ($activeBranchId === null) {
+                        abort(422, 'Debes seleccionar una sucursal activa antes de crear un envío.');
+                    }
+                    if ($activeBranchId !== $branchId) {
                         abort(403, 'La tienda no pertenece a tu sucursal activa.');
                     }
                 }
@@ -139,6 +144,8 @@ class ShipmentController extends ApiController
 
             return $shipment;
         });
+
+        ApiCache::bumpMany(['dashboard', 'branches-index']);
 
         // Broadcast: notify admin dashboard in real-time
         ShipmentCreatedEvent::dispatch($shipment);
@@ -261,6 +268,8 @@ class ShipmentController extends ApiController
             $shipment->store->user?->notify(new ShipmentAssignedNotification($shipment));
         });
 
+        ApiCache::bump('dashboard');
+
         // Broadcast: real-time update to courier, store, and admin dashboard
         $assignedCourier = Courier::withoutGlobalScopes()->find((int) $request->input('courier_id'));
         if ($assignedCourier) {
@@ -286,13 +295,27 @@ class ShipmentController extends ApiController
         $user = $request->user();
         $store = $user->store;
 
-        $rating = ShipmentRating::create([
-            'shipment_id' => $shipment->id,
-            'store_id' => $store->id,
-            'courier_id' => $shipment->courier_id,
-            'score' => $request->input('score'),
-            'comment' => $request->input('comment'),
-        ]);
+        try {
+            $rating = DB::transaction(function () use ($request, $shipment, $store): ShipmentRating {
+                // Re-check inside the transaction to close the race-condition window
+                // between ShipmentPolicy::rate() and the INSERT. If two requests
+                // slip through simultaneously the unique constraint will fire here
+                // and we catch it cleanly below.
+                if (ShipmentRating::where('shipment_id', $shipment->id)->exists()) {
+                    abort(403, 'Este envío ya fue calificado.');
+                }
+
+                return ShipmentRating::create([
+                    'shipment_id' => $shipment->id,
+                    'store_id'    => $store->id,
+                    'courier_id'  => $shipment->courier_id,
+                    'score'       => $request->input('score'),
+                    'comment'     => $request->input('comment'),
+                ]);
+            });
+        } catch (UniqueConstraintViolationException) {
+            return $this->error('Este envío ya fue calificado.', 403);
+        }
 
         // Recalculate the courier's average rating
         if ($shipment->courier) {

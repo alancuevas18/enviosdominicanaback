@@ -13,7 +13,7 @@ return new class extends Migration
         Schema::create('routes', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('courier_id')->constrained('couriers')->cascadeOnDelete();
-            $table->foreignId('branch_id')->constrained('branches');
+            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
             $table->date('date');
             $table->enum('status', ['open', 'in_progress', 'closed'])->default('open');
             $table->timestamps();

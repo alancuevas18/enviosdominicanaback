@@ -81,9 +81,15 @@ class ShipmentPolicy
 
     /**
      * Determine whether the user can assign a courier to the shipment.
+     * Only allowed when the shipment is still pending or assigned (not yet picked up).
      */
     public function assign(User $user, Shipment $shipment): bool
     {
+        // Cannot reassign once the courier has already started (picked_up, delivered, etc.)
+        if (! in_array($shipment->status, ['pending', 'assigned'], true)) {
+            return false;
+        }
+
         if ($user->hasRole('admin')) {
             return $user->getActiveBranchId() === $shipment->branch_id;
         }

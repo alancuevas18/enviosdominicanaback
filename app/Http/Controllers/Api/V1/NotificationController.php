@@ -61,7 +61,7 @@ class NotificationController extends ApiController
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        $user->unreadNotifications->markAsRead();
+        $user->unreadNotifications()->update(['read_at' => now()]);
 
         return $this->success(null, 'Todas las notificaciones marcadas como leídas.');
     }

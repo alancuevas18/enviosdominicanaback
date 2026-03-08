@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Notifications\ShipmentAssignedNotification;
 use App\Notifications\ShipmentCreatedNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Spatie\Permission\Models\Role;
@@ -89,8 +90,8 @@ describe('Shipment creation', function (): void {
     it('allows a store user to create a shipment and auto-creates 2 stops', function (): void {
         Notification::fake();
 
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , $storeToken] = createStoreWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,, $storeToken] = createStoreWithUser($branch);
 
         $response = $this->withToken($storeToken)
             ->postJson('/api/v1/shipments', [
@@ -128,7 +129,7 @@ describe('Shipment creation', function (): void {
     it('notifies branch admins when a shipment is created', function (): void {
         Notification::fake();
 
-        [$branch, $adminUser, ] = createAdminWithBranch();
+        [$branch, $adminUser,] = createAdminWithBranch();
         [,, $storeToken] = createStoreWithUser($branch);
 
         $this->withToken($storeToken)
@@ -144,8 +145,8 @@ describe('Shipment creation', function (): void {
     });
 
     it('rejects creation with invalid phone format', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [, , $storeToken] = createStoreWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [,, $storeToken] = createStoreWithUser($branch);
 
         $this->withToken($storeToken)
             ->postJson('/api/v1/shipments', [
@@ -166,9 +167,9 @@ describe('Shipment assignment', function (): void {
     it('allows admin to assign a courier and creates today\'s route', function (): void {
         Notification::fake();
 
-        [$branch, , $adminToken] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
-        [$courier, , ] = createCourierWithUser($branch);
+        [$branch,, $adminToken] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
+        [$courier,,] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()
             ->for($branch)
@@ -197,19 +198,21 @@ describe('Shipment assignment', function (): void {
         expect($shipment->status)->toBe('assigned')
             ->and($shipment->courier_id)->toBe($courier->id);
 
-        // Route created for today
-        $this->assertDatabaseHas('routes', [
-            'courier_id' => $courier->id,
-            'date'       => today()->toDateString(),
-        ]);
+        // Route created for today (date assertion uses LIKE to handle SQLite datetime format)
+        expect(
+            DB::table('routes')
+                ->where('courier_id', $courier->id)
+                ->whereRaw("date LIKE ?", [today()->toDateString() . '%'])
+                ->exists()
+        )->toBeTrue();
     });
 
     it('notifies the store when courier is assigned', function (): void {
         Notification::fake();
 
-        [$branch, , $adminToken] = createAdminWithBranch();
-        [$store, $storeUser, ] = createStoreWithUser($branch);
-        [$courier, , ] = createCourierWithUser($branch);
+        [$branch,, $adminToken] = createAdminWithBranch();
+        [$store, $storeUser,] = createStoreWithUser($branch);
+        [$courier,,] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->pending()->create();
         $pickup   = Stop::factory()->pickup()->create(['shipment_id' => $shipment->id]);
@@ -226,11 +229,11 @@ describe('Shipment assignment', function (): void {
     });
 
     it('prevents admin from assigning a courier from a different branch', function (): void {
-        [$branch, , $adminToken] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
+        [$branch,, $adminToken] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
 
         $otherBranch  = Branch::factory()->create();
-        [$otherCourier, , ] = createCourierWithUser($otherBranch);
+        [$otherCourier,,] = createCourierWithUser($otherBranch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->pending()->create();
         Stop::factory()->pickup()->create(['shipment_id' => $shipment->id]);
@@ -253,9 +256,9 @@ describe('Pickup completion', function (): void {
     it('marks shipment as picked_up when courier completes the pickup stop', function (): void {
         Notification::fake();
 
-        [$branch, , $adminToken] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
-        [$courier, , $courierToken] = createCourierWithUser($branch);
+        [$branch,, $adminToken] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
+        [$courier,, $courierToken] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->create([
             'courier_id' => $courier->id,
@@ -304,9 +307,9 @@ describe('Delivery completion', function (): void {
     it('marks shipment as delivered when courier completes delivery stop with photo', function (): void {
         Notification::fake();
 
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
-        [$courier, , $courierToken] = createCourierWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
+        [$courier,, $courierToken] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->create([
             'courier_id' => $courier->id,
@@ -352,9 +355,9 @@ describe('Delivery completion', function (): void {
     });
 
     it('rejects delivery completion without a photo', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
-        [$courier, , $courierToken] = createCourierWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
+        [$courier,, $courierToken] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->create([
             'courier_id' => $courier->id,
@@ -385,9 +388,9 @@ describe('Delivery completion', function (): void {
     it('marks shipment as not_delivered on fail action', function (): void {
         Notification::fake();
 
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
-        [$courier, , $courierToken] = createCourierWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
+        [$courier,, $courierToken] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->create([
             'courier_id' => $courier->id,
@@ -425,9 +428,11 @@ describe('Delivery completion', function (): void {
 
 describe('Shipment rating', function (): void {
     it('allows the store to rate a delivered shipment', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , $storeToken] = createStoreWithUser($branch);
-        [$courier, , ] = createCourierWithUser($branch);
+        Notification::fake();
+
+        [$branch,,] = createAdminWithBranch();
+        [$store,, $storeToken] = createStoreWithUser($branch);
+        [$courier,,] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->create([
             'courier_id' => $courier->id,
@@ -439,7 +444,7 @@ describe('Shipment rating', function (): void {
                 'score'   => 5,
                 'comment' => '¡Excellent service!',
             ])
-            ->assertStatus(200)
+            ->assertStatus(201)
             ->assertJsonPath('success', true);
 
         $this->assertDatabaseHas('shipment_ratings', [
@@ -451,8 +456,8 @@ describe('Shipment rating', function (): void {
     });
 
     it('prevents rating a shipment that is not delivered', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , $storeToken] = createStoreWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,, $storeToken] = createStoreWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->pending()->create();
 
@@ -464,9 +469,11 @@ describe('Shipment rating', function (): void {
     });
 
     it('prevents rating a shipment twice', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , $storeToken] = createStoreWithUser($branch);
-        [$courier, , ] = createCourierWithUser($branch);
+        Notification::fake();
+
+        [$branch,,] = createAdminWithBranch();
+        [$store,, $storeToken] = createStoreWithUser($branch);
+        [$courier,,] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->create([
             'courier_id' => $courier->id,
@@ -476,7 +483,7 @@ describe('Shipment rating', function (): void {
         // First rating
         $this->withToken($storeToken)
             ->postJson("/api/v1/shipments/{$shipment->id}/rate", ['score' => 5])
-            ->assertStatus(200);
+            ->assertStatus(201);
 
         // Second rating
         $this->withToken($storeToken)
@@ -491,8 +498,8 @@ describe('Shipment rating', function (): void {
 
 describe('Shipment update', function (): void {
     it('allows store to edit a pending shipment', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , $storeToken] = createStoreWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,, $storeToken] = createStoreWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->pending()->create();
 
@@ -506,9 +513,9 @@ describe('Shipment update', function (): void {
     });
 
     it('prevents editing a non-pending shipment', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , $storeToken] = createStoreWithUser($branch);
-        [$courier, , ] = createCourierWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,, $storeToken] = createStoreWithUser($branch);
+        [$courier,,] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->create([
             'courier_id' => $courier->id,
@@ -529,8 +536,8 @@ describe('Shipment update', function (): void {
 
 describe('Soft deletes', function (): void {
     it('soft-deletes a shipment — record remains in DB with deleted_at set', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->pending()->create();
         $shipment->delete();
@@ -541,8 +548,8 @@ describe('Soft deletes', function (): void {
     });
 
     it('soft-deletes a store while preserving shipment history', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->pending()->create();
         $store->delete();
@@ -553,9 +560,9 @@ describe('Soft deletes', function (): void {
     });
 
     it('soft-deletes a courier while preserving shipment history', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [$store, , ] = createStoreWithUser($branch);
-        [$courier, , ] = createCourierWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [$store,,] = createStoreWithUser($branch);
+        [$courier,,] = createCourierWithUser($branch);
 
         $shipment = Shipment::factory()->for($branch)->for($store)->create([
             'courier_id' => $courier->id,
@@ -575,8 +582,8 @@ describe('Soft deletes', function (): void {
 
 describe('Authorization', function (): void {
     it('prevents a courier from creating shipments', function (): void {
-        [$branch, , ] = createAdminWithBranch();
-        [, , $courierToken] = createCourierWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [,, $courierToken] = createCourierWithUser($branch);
 
         $this->withToken($courierToken)
             ->postJson('/api/v1/shipments', [
@@ -593,9 +600,9 @@ describe('Authorization', function (): void {
     });
 
     it('prevents admin from viewing shipments of another branch', function (): void {
-        [$branch1, , $adminToken] = createAdminWithBranch();
-        [$branch2, , ] = createAdminWithBranch();
-        [$store2, , ] = createStoreWithUser($branch2);
+        [$branch1,, $adminToken] = createAdminWithBranch();
+        [$branch2,,] = createAdminWithBranch();
+        [$store2,,] = createStoreWithUser($branch2);
 
         $shipment = Shipment::factory()->for($branch2)->for($store2)->pending()->create();
 
@@ -615,8 +622,8 @@ describe('Queued notifications', function (): void {
         Queue::fake();
         Notification::fake();
 
-        [$branch, , ] = createAdminWithBranch();
-        [, , $storeToken] = createStoreWithUser($branch);
+        [$branch,,] = createAdminWithBranch();
+        [,, $storeToken] = createStoreWithUser($branch);
 
         $this->withToken($storeToken)
             ->postJson('/api/v1/shipments', [

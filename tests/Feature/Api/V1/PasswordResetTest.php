@@ -20,7 +20,7 @@ describe('Forgot Password', function (): void {
         $response->assertStatus(200)
             ->assertJson([
                 'success' => true,
-                'message' => 'Password reset link sent to your email',
+                'message' => 'Si el correo está registrado, recibirás un enlace de recuperación en breve.',
             ]);
     });
 
@@ -63,7 +63,7 @@ describe('Reset Password', function (): void {
         $response->assertStatus(200)
             ->assertJson([
                 'success' => true,
-                'message' => 'Password reset successfully',
+                'message' => 'Contraseña restablecida exitosamente.',
             ]);
 
         // Verify password was changed
@@ -86,7 +86,7 @@ describe('Reset Password', function (): void {
         $response->assertStatus(400)
             ->assertJson([
                 'success' => false,
-                'message' => 'Invalid or expired reset token',
+                'message' => 'Token inválido o expirado.',
             ]);
     });
 
@@ -115,7 +115,7 @@ describe('Reset Password', function (): void {
         $response->assertStatus(400)
             ->assertJson([
                 'success' => false,
-                'message' => 'User not found',
+                'message' => 'Usuario no encontrado.',
             ]);
     });
 });

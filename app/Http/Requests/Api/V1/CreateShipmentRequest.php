@@ -20,7 +20,8 @@ class CreateShipmentRequest extends FormRequest
     {
         return [
             'recipient_name' => ['required', 'string', 'max:255'],
-            'recipient_phone' => ['required', 'string', 'regex:/^\+1[0-9]{10}$/'],
+            // E.164 format (international): +[1-9]{1}[0-9]{1,14} requires country code
+            'recipient_phone' => ['required', 'string', 'regex:/^\+[1-9]\d{1,14}$/'],
             'address' => ['required', 'string'],
             'maps_url' => ['nullable', 'url', 'max:2048'],
             'sector' => ['nullable', 'string', 'max:255'],
@@ -39,7 +40,7 @@ class CreateShipmentRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'recipient_phone.regex' => 'El teléfono del destinatario debe tener el formato +1XXXXXXXXXX.',
+            'recipient_phone.regex' => 'El teléfono del destinatario debe ser un número válido internacional (ej: +1-809-XXX-XXXX o +18095555555).',
             'maps_url.url' => 'El enlace de Google Maps debe ser una URL válida.',
         ];
     }

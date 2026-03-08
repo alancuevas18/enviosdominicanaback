@@ -26,11 +26,18 @@ use Illuminate\Support\Facades\Route;
 // ──────────────────────────────────────────────────────────────────────────
 // Public (unauthenticated)
 // ──────────────────────────────────────────────────────────────────────────
-Route::middleware('throttle:auth')->group(function (): void {
-    Route::post('login', [AuthController::class, 'login'])->name('api.v1.login');
-    Route::post('forgot-password', [AuthController::class, 'forgotPassword'])->name('password.email');
-    Route::post('reset-password', [AuthController::class, 'resetPassword'])->name('password.reset');
-});
+// Stricter rate limiting for authentication endpoints (prevent brute force)
+Route::post('login', [AuthController::class, 'login'])
+    ->middleware('throttle:5,1') // 5 attempts per 1 minute per IP
+    ->name('api.v1.login');
+
+Route::post('forgot-password', [AuthController::class, 'forgotPassword'])
+    ->middleware('throttle:3,1') // 3 attempts per 1 minute per IP
+    ->name('password.email');
+
+Route::post('reset-password', [AuthController::class, 'resetPassword'])
+    ->middleware('throttle:5,1') // 5 attempts per 1 minute per IP
+    ->name('password.reset');
 
 // Store access request — public submission (honeypot protected inside FormRequest)
 Route::post('access-requests', [StoreAccessRequestController::class, 'submit'])
@@ -105,8 +112,7 @@ Route::middleware(['auth:sanctum', 'throttle:authenticated'])->group(function ()
             ->names('couriers');
         Route::get('couriers/{courier}/ratings', [CourierController::class, 'ratings'])->name('couriers.ratings');
 
-        // Shipments — admin view & management
-        Route::patch('shipments/{shipment}', [ShipmentController::class, 'update'])->name('shipments.update');
+        // Shipments — admin management (assign only)
         Route::post('shipments/{shipment}/assign', [ShipmentController::class, 'assign'])->name('shipments.assign');
 
         // Routes — admin view & reorder
@@ -121,17 +127,19 @@ Route::middleware(['auth:sanctum', 'throttle:authenticated'])->group(function ()
     // Store role
     // ──────────────────────────────────────────────────────────────────────
     Route::middleware('role:store')->name('api.v1.store.')->group(function (): void {
-        Route::post('shipments', [ShipmentController::class, 'store'])->name('shipments.store');
         Route::post('shipments/{shipment}/rate', [ShipmentController::class, 'rate'])->name('shipments.rate');
     });
 
     // ──────────────────────────────────────────────────────────────────────
-    // Shared: Store + Admin can read shipments
+    // Shared: Store + Admin can read and create shipments
     // ──────────────────────────────────────────────────────────────────────
     Route::middleware('role:root|admin|store')->name('api.v1.shipments.')->group(function (): void {
         Route::get('shipments', [ShipmentController::class, 'index'])->name('index');
+        Route::post('shipments', [ShipmentController::class, 'store'])->name('store');
         Route::get('shipments/{shipment}', [ShipmentController::class, 'show'])->name('show');
         Route::get('shipments/{shipment}/history', [ShipmentController::class, 'history'])->name('history');
+        // Update allowed for store (own pending) and admin (branch-scoped); policy enforces ownership
+        Route::patch('shipments/{shipment}', [ShipmentController::class, 'update'])->name('update');
     });
 
     // ──────────────────────────────────────────────────────────────────────

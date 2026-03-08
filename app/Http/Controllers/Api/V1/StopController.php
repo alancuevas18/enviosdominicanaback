@@ -13,6 +13,7 @@ use App\Events\ShipmentStatusUpdatedEvent;
 use App\Notifications\ShipmentDeliveredNotification;
 use App\Notifications\ShipmentNotDeliveredNotification;
 use App\Notifications\ShipmentPickedUpNotification;
+use App\Support\ApiCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -34,6 +35,19 @@ class StopController extends ApiController
         $shipment = $stop->shipment;
         $oldStatus = $shipment->status;
 
+        // Guard: prevent double-processing (duplicate status history, photo overwrite, etc.)
+        if ($stop->status !== 'pending') {
+            return $this->error('Esta parada ya fue procesada anteriormente.', 422);
+        }
+
+        // Guard: chosen action must match the stop type
+        if ($action === 'complete_pickup' && $stop->type !== 'pickup') {
+            return $this->error('La acción complete_pickup solo aplica a paradas de recogida.', 422);
+        }
+        if ($action === 'complete_delivery' && $stop->type !== 'delivery') {
+            return $this->error('La acción complete_delivery solo aplica a paradas de entrega.', 422);
+        }
+
         match ($action) {
             'complete_pickup' => $this->handleCompletePickup($stop, $shipment, $user),
             'complete_delivery' => $this->handleCompleteDelivery($stop, $shipment, $user, $request),
@@ -44,6 +58,7 @@ class StopController extends ApiController
         // Broadcast status change if the shipment status was updated
         $shipment->refresh();
         if ($shipment->status !== $oldStatus) {
+            ApiCache::bump('dashboard');
             ShipmentStatusUpdatedEvent::dispatch($shipment, $oldStatus, $shipment->status);
         }
 

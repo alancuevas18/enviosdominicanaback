@@ -19,13 +19,13 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => explode(',', env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5173')),
 
     'allowed_origins_patterns' => [],
 
-    'allowed_headers' => ['*'],
+    'allowed_headers' => ['Content-Type', 'Authorization', 'X-Requested-With'],
 
     'exposed_headers' => [
         'X-RateLimit-Limit',
@@ -37,7 +37,7 @@ return [
         'Sunset',
     ],
 
-    'max_age' => 86400, // 24 hours
+    'max_age' => 3600, // 1 hour (reduced from 24 hours for security)
 
     'supports_credentials' => false,
 

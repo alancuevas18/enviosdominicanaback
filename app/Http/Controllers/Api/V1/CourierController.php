@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\V1\CreateCourierRequest;
 use App\Models\Courier;
 use App\Models\User;
+use App\Support\ApiCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,18 +25,35 @@ class CourierController extends ApiController
     {
         $this->authorize('viewAny', Courier::class);
 
-        $couriers = Courier::query()
-            ->with(['branch:id,name', 'user:id,name,email'])
-            ->when($request->boolean('active_only', true), fn($q) => $q->where('active', true))
-            ->when($request->filled('search'), function ($q) use ($request): void {
-                $search = $request->input('search');
-                $q->where(function ($sub) use ($search): void {
-                    $sub->where('name', 'like', "%{$search}%")
-                        ->orWhere('phone', 'like', "%{$search}%");
-                });
-            })
-            ->latest()
-            ->paginate(20);
+        $cacheKey = implode(':', [
+            'user',
+            (string) $request->user()?->id,
+            'branch',
+            (string) ($request->user()?->getActiveBranchId() ?? 'all'),
+            'active_only',
+            (string) (int) $request->boolean('active_only', true),
+            'search',
+            md5((string) $request->input('search', '')),
+            'page',
+            (string) (int) $request->input('page', 1),
+        ]);
+
+        $ttlSeconds = max(10, (int) env('LIST_CACHE_TTL_SECONDS', 60));
+
+        $couriers = ApiCache::remember('couriers-index', $cacheKey, now()->addSeconds($ttlSeconds), function () use ($request) {
+            return Courier::query()
+                ->with(['branch:id,name', 'user:id,name,email'])
+                ->when($request->boolean('active_only', true), fn($q) => $q->where('active', true))
+                ->when($request->filled('search'), function ($q) use ($request): void {
+                    $search = $request->input('search');
+                    $q->where(function ($sub) use ($search): void {
+                        $sub->where('name', 'like', "%{$search}%")
+                            ->orWhere('phone', 'like', "%{$search}%");
+                    });
+                })
+                ->latest()
+                ->paginate(20);
+        });
 
         return $this->paginated($couriers, 'Mensajeros obtenidos exitosamente.');
     }
@@ -49,7 +67,9 @@ class CourierController extends ApiController
     {
         $this->authorize('create', Courier::class);
 
-        $result = DB::transaction(function () use ($request): Courier {
+        $tempPassword = '';
+
+        $result = DB::transaction(function () use ($request, &$tempPassword): Courier {
             $tempPassword = Str::password(12, symbols: false);
 
             /** @var User $user */
@@ -72,10 +92,12 @@ class CourierController extends ApiController
             ]);
         });
 
-        return $this->created(
-            $result->load(['branch:id,name', 'user:id,name,email']),
-            'Mensajero creado exitosamente.'
-        );
+        ApiCache::bumpMany(['couriers-index', 'branches-index']);
+
+        return $this->created([
+            'courier'       => $result->load(['branch:id,name', 'user:id,name,email']),
+            'temp_password' => $tempPassword,
+        ], 'Mensajero creado exitosamente. Comparte la contraseña temporal con el mensajero.');
     }
 
     /**
@@ -126,6 +148,7 @@ class CourierController extends ApiController
         ]);
 
         $courier->update($request->validated());
+        ApiCache::bumpMany(['couriers-index', 'branches-index']);
 
         return $this->success($courier, 'Mensajero actualizado exitosamente.');
     }
@@ -140,8 +163,10 @@ class CourierController extends ApiController
         $this->authorize('delete', $courier);
 
         $courier->update(['active' => false]);
+        $courier->delete(); // soft-delete — preserves delivery/rating history
+        ApiCache::bumpMany(['couriers-index', 'branches-index']);
 
-        return $this->success(null, 'Mensajero desactivado exitosamente.');
+        return $this->success(null, 'Mensajero eliminado exitosamente.');
     }
 
     /**

@@ -13,7 +13,7 @@ return new class extends Migration
         Schema::create('couriers', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
-            $table->foreignId('branch_id')->constrained('branches');
+            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
             $table->string('name');
             $table->string('phone');
             $table->string('vehicle')->nullable();
