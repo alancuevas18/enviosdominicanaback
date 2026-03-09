@@ -38,6 +38,7 @@ class CreateStoreRequest extends FormRequest
             'contact_person' => ['nullable', 'string', 'max:255'],
             'default_notification_message' => ['nullable', 'string'],
             'notes' => ['nullable', 'string'],
+            'maps_url' => ['nullable', 'string', 'max:2048'],
         ];
     }
 }

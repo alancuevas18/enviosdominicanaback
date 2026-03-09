@@ -28,10 +28,12 @@ class StoreController extends ApiController
         $cacheKey = implode(':', [
             'user',
             (string) $request->user()?->id,
-            'branch',
-            (string) ($request->user()?->getActiveBranchId() ?? 'all'),
-            'active_only',
-            (string) (int) $request->boolean('active_only', true),
+            'branch_filter',
+            (string) $request->input('branch_id', 'all'),
+            'with_inactive',
+            (string) (int) $request->boolean('with_inactive', false),
+            'active_filter',
+            (string) $request->input('active', ''),
             'search',
             md5((string) $request->input('search', '')),
             'page',
@@ -43,7 +45,15 @@ class StoreController extends ApiController
         $stores = ApiCache::remember('stores-index', $cacheKey, now()->addSeconds($ttlSeconds), function () use ($request) {
             return Store::query()
                 ->with(['branch:id,name,city', 'user:id,name,email'])
-                ->when($request->boolean('active_only', true), fn($q) => $q->where('active', true))
+                ->when($request->boolean('with_inactive', false), fn($q) => $q, function ($q) use ($request): void {
+                    // No with_inactive: respect explicit active param or default to active only
+                    if ($request->filled('active')) {
+                        $q->where('active', (bool) (int) $request->input('active'));
+                    } else {
+                        $q->where('active', true);
+                    }
+                })
+                ->when($request->filled('branch_id'), fn($q) => $q->where('branch_id', (int) $request->input('branch_id')))
                 ->when($request->filled('search'), function ($q) use ($request): void {
                     $search = $request->input('search');
                     $q->where(function ($sub) use ($search): void {
@@ -139,7 +149,7 @@ class StoreController extends ApiController
     {
         $this->authorize('update', $store);
 
-        $request->validate([
+        $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'legal_name' => ['nullable', 'string', 'max:255'],
             'rnc' => ['nullable', 'string', 'max:20'],
@@ -155,17 +165,16 @@ class StoreController extends ApiController
             'contact_person' => ['nullable', 'string', 'max:255'],
             'default_notification_message' => ['nullable', 'string'],
             'notes' => ['nullable', 'string'],
+            'maps_url' => ['nullable', 'string', 'max:2048'],
             'active' => ['sometimes', 'boolean'],
         ]);
 
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        $data = $request->validated();
-
-        // Only root/admin can activate or deactivate a store.
-        // Prevent a store user from toggling their own active status.
-        if ($user->hasRole('store')) {
+        // Only root/admin can activate or deactivate another store.
+        // Store users can only change their own store's active status.
+        if ($user->hasRole('store') && $user->store?->id !== $store->id) {
             unset($data['active']);
         }
 

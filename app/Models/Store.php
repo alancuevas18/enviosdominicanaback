@@ -35,6 +35,7 @@ class Store extends Model
         'contact_person',
         'default_notification_message',
         'notes',
+        'maps_url',
         'active',
     ];
 

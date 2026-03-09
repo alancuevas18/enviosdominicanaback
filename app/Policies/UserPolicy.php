@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
-use App\Models\StoreAccessRequest;
 use App\Models\User;
 
-class AccessRequestPolicy
+class UserPolicy
 {
     /**
      * Root can do everything.
@@ -26,18 +25,28 @@ class AccessRequestPolicy
         return false;
     }
 
-    public function view(User $user, StoreAccessRequest $request): bool
+    public function view(User $user, User $managedUser): bool
     {
         return false;
     }
 
-    public function approve(User $user, StoreAccessRequest $request): bool
+    public function createAdmin(User $user): bool
     {
         return false;
     }
 
-    public function reject(User $user, StoreAccessRequest $request): bool
+    public function update(User $user, User $managedUser): bool
     {
         return false;
+    }
+
+    public function syncBranches(User $user, User $managedUser): bool
+    {
+        return false;
+    }
+
+    public function delete(User $user, User $managedUser): bool
+    {
+        return false; // root bypasses via before()
     }
 }

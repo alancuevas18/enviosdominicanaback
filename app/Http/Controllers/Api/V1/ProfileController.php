@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Resources\UserResource;
 use App\Models\Store;
+use App\Support\ApiCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -87,7 +88,7 @@ class ProfileController extends ApiController
             return $this->notFound('No tienes un perfil de tienda.');
         }
 
-        $request->validate([
+        $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'phone' => ['nullable', 'string', 'max:20'],
             'whatsapp' => ['nullable', 'string', 'max:20'],
@@ -100,9 +101,11 @@ class ProfileController extends ApiController
             'instagram' => ['nullable', 'string', 'max:100'],
             'contact_person' => ['nullable', 'string', 'max:255'],
             'default_notification_message' => ['nullable', 'string'],
+            'active' => ['sometimes', 'boolean'],
         ]);
 
-        $store->update($request->validated());
+        $store->update($validated);
+        ApiCache::bumpMany(['stores-index', 'branches-index']);
 
         return $this->success($store, 'Perfil de tienda actualizado exitosamente.');
     }

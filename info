@@ -1,6 +1,5 @@
-
-Rol	Email	Contraseña
-root	root@enviosdominicana.com	SuperSecret2025!
-admin	admin1@mensajeria.com	Admin1234!
-store	fashionrd@tienda.com	Store1234!
-courier	courier1@mensajeria.com	Courier1234!
+Rol Email Contraseña Token de Prueba
+root root@enviosdominicana.com SuperSecret2025! 21|aJ8NGyexDKn2seazilMys4dP1lYtlU6ikaZEv2qleaeebdd3
+admin admin1@mensajeria.com Admin1234!
+store fashionrd@tienda.com Store1234!
+courier courier1@mensajeria.com Courier1234!

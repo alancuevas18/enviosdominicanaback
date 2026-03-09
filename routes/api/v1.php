@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\V1\ActivityLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BranchController;
 use App\Http\Controllers\Api\V1\CourierController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\Api\V1\ShipmentController;
 use App\Http\Controllers\Api\V1\StopController;
 use App\Http\Controllers\Api\V1\StoreAccessRequestController;
 use App\Http\Controllers\Api\V1\StoreController;
+use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -93,6 +95,22 @@ Route::middleware(['auth:sanctum', 'throttle:authenticated'])->group(function ()
             Route::get('{accessRequest}', [StoreAccessRequestController::class, 'show'])->name('show');
             Route::post('{accessRequest}/approve', [StoreAccessRequestController::class, 'approve'])->name('approve');
             Route::post('{accessRequest}/reject', [StoreAccessRequestController::class, 'reject'])->name('reject');
+        });
+
+        // Users management
+        Route::prefix('users')->name('users.')->group(function (): void {
+            Route::get('/', [UserController::class, 'index'])->name('index');
+            Route::post('admins', [UserController::class, 'storeAdmin'])->name('admins.store');
+            Route::get('{user}', [UserController::class, 'show'])->name('show');
+            Route::patch('{user}', [UserController::class, 'update'])->name('update');
+            Route::delete('{user}', [UserController::class, 'destroy'])->name('destroy');
+            Route::put('{user}/branches', [UserController::class, 'syncBranches'])->name('branches.sync');
+        });
+
+        // Activity log (read-only, root only)
+        Route::prefix('activity-log')->name('activity-log.')->group(function (): void {
+            Route::get('/', [ActivityLogController::class, 'index'])->name('index');
+            Route::get('log-names', [ActivityLogController::class, 'logNames'])->name('log-names');
         });
     });
 

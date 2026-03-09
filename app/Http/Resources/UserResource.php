@@ -34,6 +34,18 @@ final class UserResource extends JsonResource
                 'name' => $b->name,
                 'city' => $b->city,
             ])),
+            'store' => $this->whenLoaded('store', fn() => $this->store !== null ? [
+                'id' => $this->store->id,
+                'branch_id' => $this->store->branch_id,
+                'name' => $this->store->name,
+                'active' => $this->store->active,
+            ] : null),
+            'courier' => $this->whenLoaded('courier', fn() => $this->courier !== null ? [
+                'id' => $this->courier->id,
+                'branch_id' => $this->courier->branch_id,
+                'name' => $this->courier->name,
+                'active' => $this->courier->active,
+            ] : null),
             'active_branch_id' => $this->when(
                 $request->user()?->is($this->resource),
                 fn() => $this->getActiveBranchId()

@@ -94,7 +94,7 @@ class BranchController extends ApiController
     }
 
     /**
-     * Deactivate a branch (soft delete via active=false).
+     * Soft-delete a branch.
      *
      * DELETE /api/v1/branches/{id}
      */
@@ -103,9 +103,10 @@ class BranchController extends ApiController
         $this->authorize('delete', $branch);
 
         $branch->update(['active' => false]);
+        $branch->delete();
         ApiCache::bump('branches-index');
 
-        return $this->success(null, 'Sucursal desactivada exitosamente.');
+        return $this->success(null, 'Sucursal eliminada exitosamente.');
     }
 
     /**
